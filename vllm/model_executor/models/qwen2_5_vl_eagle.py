@@ -110,13 +110,15 @@ class Qwen2_5Model(nn.Module):
         # eagle 的设计，通过融合当前输入和历史的隐藏状态来增强预测能力
         hidden_states = self.fc(
             torch.cat((inputs_embeds, hidden_states), dim=-1))
-        hidden_states = self.language_model.model(
-            input_ids=input_ids,
-            positions=positions,
-            intermediate_tensors=intermediate_tensors,
-            inputs_embeds=inputs_embeds,
-        )
-        return hidden_states
+        residual = None
+        for layer in self.layers:
+            hidden_states, residual = layer(
+                positions,
+                hidden_states,
+                residual,
+            )
+        hidden_states, _ = self.norm(hidden_states, residual)
+        return hidden_states, hidden_states
 
     def load_weights(self, weights: Iterable[tuple[str,
                                                    torch.Tensor]]) -> set[str]:
