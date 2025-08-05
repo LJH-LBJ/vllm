@@ -151,7 +151,7 @@ class Qwen2_5Model(nn.Module):
             loaded_params.add(name)
         return loaded_params
 
-class Qwen2_5_VLForCausalLM(Qwen2_5_VLForConditionalGeneration):
+class EagleQwen2_5_VLForCausalLM(Qwen2_5_VLForConditionalGeneration):
     
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
