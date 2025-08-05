@@ -1848,6 +1848,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             if self.is_multimodal_model:
                 mm_embeds = self._gather_mm_embeddings(scheduler_output,
                                                        shift_computed_tokens=1)
+                logger.warning(f"[ljh]multimodal_embeddings={mm_embeds}")
 
             draft_token_ids = self.drafter.propose(
                 target_token_ids=target_token_ids,

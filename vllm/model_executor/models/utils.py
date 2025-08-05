@@ -312,7 +312,7 @@ def init_vllm_registered_model(
     if hf_config is not None:
         vllm_config = vllm_config.with_hf_config(hf_config,
                                                  architectures=architectures)
-
+    logger.warning(f"[ljh]vllm_config = {vllm_config}")
     return initialize_model(vllm_config=vllm_config, prefix=prefix)
 
 
