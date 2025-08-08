@@ -23,7 +23,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.layers.quantization.torchao import TorchAOConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
-from vllm.model_executor.models.qwen2 import Qwen2DecoderLayer
+from vllm.model_executor.models.qwen2 import Qwen2DecoderLayer, Qwen2ForCausalLM
 from vllm.model_executor.models.qwen2_5_vl import (Qwen2_5_VLForConditionalGeneration,
                                               Qwen2_5_VisionTransformer)
 from vllm.model_executor.models.utils import extract_layer_index
@@ -55,26 +55,17 @@ class Qwen2_5Model(nn.Module):
             vllm_config.speculative_config.draft_model_config.hf_config)
         self.multimodal_config = (
             vllm_config.speculative_config.draft_model_config.multimodal_config)
-        
-        # 不需要visual模型
-        # self.visual = Qwen2_5_VisionTransformer(
-        #     self.config.vision_config,
-        #     norm_eps=getattr(self.config, "rms_norm_eps", 1e-6),
-        #     quant_config=quant_config,
-        #     prefix=maybe_prefix(prefix, "visual"),
-        # )
-
-        # 轻量语言模型初始化
-        # draft_config = self.config
-        # self.language_model = init_vllm_registered_model(
-        #     vllm_config=vllm_config.with_hf_config(draft_config,
-        #                                            architectures=["Qwen2ForCausalLM"]),
-        #     prefix=maybe_prefix(prefix, "language_model"),
-        #     architectures=["Qwen2ForCausalLM"],
-        # )
-        # logger.warning(f"[ljh]self.draft_language_model={self.language_model}")
-        # self.make_empty_intermediate_tensors = (
-        #     self.language_model.make_empty_intermediate_tensors)
+        # embbeding
+        if get_pp_group().is_first_rank or (self.config.tie_word_embeddings
+                                            and get_pp_group().is_last_rank):
+            self.embed_tokens = VocabParallelEmbedding(
+                self.config.vocab_size,
+                self.config.hidden_size,
+                quant_config=quant_config,
+                prefix=f"{prefix}.embed_tokens",
+            )
+        else:
+            self.embed_tokens = PPMissingLayer()
         
          # 轻量语言模型初始化
         self.layers = nn.ModuleList([
@@ -124,16 +115,19 @@ class Qwen2_5Model(nn.Module):
                                                    torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
-            (".qkv_proj", ".q_proj", "q"),
-            (".qkv_proj", ".k_proj", "k"),
-            (".qkv_proj", ".v_proj", "v"),
-            (".gate_up_proj", ".gate_proj", 0),
-            (".gate_up_proj", ".up_proj", 1),
+            ("qkv_proj", "q_proj", "q"),
+            ("qkv_proj", "k_proj", "k"),
+            ("qkv_proj", "v_proj", "v"),
+            ("gate_up_proj", "gate_proj", 0),
+            ("gate_up_proj", "up_proj", 1),
         ]
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
         for name, loaded_weight in weights:
-            name = name.removeprefix("model.")
+            # name = name.removeprefix("model.")
+            # TODO :和训练的模型有关，可能需要修改
+            if (name.find("t2d") or name.find("d2t") or name.find("hidden_norm"))  and name not in params_dict:
+                continue
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
@@ -150,20 +144,18 @@ class Qwen2_5Model(nn.Module):
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)
+                # TODO: 训练一个合适的模型
+                if name.startswith("fc"):
+                    loaded_weight = loaded_weight[:, :self.config.hidden_size * 2]
+                    logger.warning(f"reduce size loaded_weight:{name}: {loaded_weight.shape}")
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
-        for name in params_dict:
-            # if PP disabled then draft will share embed with target
-            if get_pp_group().world_size == 1 and \
-                "embed_tokens." in name:
-                continue
-            assert name in loaded_params, f"{name} is not loaded!"
         return loaded_params
 
-class EagleQwen2_5_VLForCausalLM(Qwen2_5_VLForConditionalGeneration):
+class EagleQwen2_5_VLForCausalLM(Qwen2ForCausalLM):
     
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
-        super().__init__()
+        nn.Module.__init__(self)
         self.config = vllm_config.speculative_config.draft_model_config.hf_config
         self.multimodal_config = vllm_config.model_config.multimodal_config
 
@@ -183,24 +175,19 @@ class EagleQwen2_5_VLForCausalLM(Qwen2_5_VLForConditionalGeneration):
         logit_scale = getattr(self.config, "logit_scale", 1.0)
         self.logits_processor = LogitsProcessor(self.config.vocab_size,
                                                 scale=logit_scale)
-        # embbeding
-        if get_pp_group().is_first_rank or (self.config.tie_word_embeddings
-                                            and get_pp_group().is_last_rank):
-            self.embed_tokens = VocabParallelEmbedding(
-                self.config.vocab_size,
-                self.config.hidden_size,
-                quant_config=quant_config,
-                prefix=f"{prefix}.embed_tokens",
-            )
-        else:
-            self.embed_tokens = PPMissingLayer()
     
     def load_weights(self, weights):
         loader = AutoWeightsLoader(self,
                                    skip_prefixes=(["lm_head."]),
                                    )
+        model_weights = {}
+        
+        for name, loaded_weight in weights:
+            if "lm_head" not in name:
+                name = "model." + name
+            model_weights[name] = loaded_weight
 
-        return loader.load_weights(weights, mapper=super().hf_to_vllm_mapper)
+        loader.load_weights(model_weights.items())
 
     def forward(
             self,
@@ -217,13 +204,12 @@ class EagleQwen2_5_VLForCausalLM(Qwen2_5_VLForConditionalGeneration):
         input_ids: torch.Tensor,
         multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
     ) -> torch.Tensor:
-        inputs_embeds = self.language_model.get_input_embeddings(input_ids)
+        inputs_embeds = self.model.get_input_embeddings(input_ids)
         if multimodal_embeddings is not None \
             and len(multimodal_embeddings) != 0:
             inputs_embeds = merge_multimodal_embeddings(
                 input_ids, inputs_embeds, multimodal_embeddings,
-                [self.config.image_token_id, self.config.video_token_id])
+                self.config.image_token_index)
         return inputs_embeds
-
 
         

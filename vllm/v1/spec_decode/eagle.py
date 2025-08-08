@@ -601,6 +601,11 @@ class EagleProposer:
 
         return spec_common_attn_metadata, token_indices
 
+    def get_model_name(self, model: nn.Module) -> str:
+        if hasattr(model, 'module'):  # multi-GPU
+            model = model.module
+        return model.__class__.__name__
+
     def load_model(self, target_model: nn.Module) -> None:
         draft_model_config = \
             self.vllm_config.speculative_config.draft_model_config
@@ -620,8 +625,12 @@ class EagleProposer:
 
         if supports_multimodal(target_model):
             # handle multimodality
-            self.model.config.image_token_index = (
-                target_model.config.image_token_index)
+            if (self.get_model_name(target_model) == "Qwen2_5_VLForConditionalGeneration"):
+                self.model.config.image_token_index = (
+                target_model.config.image_token_id)
+            else:
+                self.model.config.image_token_index = (
+                    target_model.config.image_token_index)
             target_language_model = target_model.get_language_model()
         else:
             target_language_model = target_model
