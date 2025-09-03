@@ -71,7 +71,7 @@ from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.config import uses_mrope
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 
-from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
+from .interfaces import (MultiModalEmbeddings, SupportsEagle3, SupportsLoRA,
                          SupportsMultiModal, SupportsPP)
 from .utils import (AutoWeightsLoader, WeightsMapper,
                     init_vllm_registered_model, maybe_prefix,
@@ -1039,7 +1039,7 @@ class Qwen2VLMultiModalProcessor(BaseMultiModalProcessor[Qwen2VLProcessingInfo]
                                         info=Qwen2VLProcessingInfo,
                                         dummy_inputs=Qwen2VLDummyInputsBuilder)
 class Qwen2VLForConditionalGeneration(nn.Module, SupportsMultiModal,
-                                      SupportsLoRA, SupportsPP):
+                                      SupportsLoRA, SupportsPP, SupportsEagle3):
 
     # To ensure correct weight loading and mapping.
     hf_to_vllm_mapper = WeightsMapper(
@@ -1239,6 +1239,20 @@ class Qwen2VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
     def get_language_model(self) -> torch.nn.Module:
         return self.language_model
+
+    def set_aux_hidden_state_layers(self, layers: tuple[int, ...]) -> None:
+        """
+        Set which layers should output auxiliary hidden states for EAGLE3.
+        Delegates to the underlying language model.
+        """
+        self.language_model.set_aux_hidden_state_layers(layers)
+
+    def get_eagle3_aux_hidden_state_layers(self) -> tuple[int, ...]:
+        """
+        Get the layer indices that should output auxiliary hidden states for EAGLE3.
+        Delegates to the underlying language model.
+        """
+        return self.language_model.get_eagle3_aux_hidden_state_layers()
 
     def get_multimodal_embeddings(self,
                                   **kwargs: object) -> MultiModalEmbeddings:
