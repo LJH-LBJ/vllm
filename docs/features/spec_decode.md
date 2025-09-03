@@ -235,6 +235,9 @@ A few important things to consider when using the EAGLE based draft models:
 4. When using EAGLE-3 based draft model, option "method" must be set to "eagle3".
    That is, to specify `"method": "eagle3"` in `speculative_config`.
 
+5. EAGLE-3 supports multimodal models such as Qwen2-VL. The multimodal model serves as the target model
+   while the speculative draft model remains text-only.
+
 A variety of EAGLE draft models are available on the Hugging Face hub:
 
 | Base Model                                                           | EAGLE on Hugging Face                     | # EAGLE Parameters |
