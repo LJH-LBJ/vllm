@@ -1270,31 +1270,60 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         )
 
     @torch.inference_mode()
-    def warmup_vision(self, tHW: Optional[list[list[int]]] = 
-                      [[1, 336, 336], [1, 448, 448]]) -> None:
-        """Run warmup for vision model.
+    def warmup_vision(
+        self,
+        tHW: Optional[list[list[int]]] = None,
+    ) -> None:
+        """
+        Warm up the vision encoder for IMAGE inputs to avoid first-request jit/loads.
 
         Args:
-            tHW: List of [t, H, W] for warmup. Default to [[1, 336, 336],
-                [1, 448, 448]] or can be overridden by tHW.
+            tHW: iterable of [t, H, W] for warmup.
+                - t is the temporal grid AFTER temporal patching (image -> t=1).
+                - H, W are input image sizes in pixels.
+                Default: [[1, 336, 336], [1, 448, 448]]
+
+        Notes:
+            - This function targets Qwen2_5_VLImagePixelInputs.
+            - Per-patch flattened dim is cps = C * patch_size * patch_size (NO temporal).
+            - grid_thw must pass the PRE-MERGE patch grid [t, h, w], where
+            h = H // patch_size, w = W // patch_size. DO NOT multiply spatial_merge_size.
         """
-        if self.visual is None:
+        if getattr(self, "visual", None) is None:
             return
+
         vision_config = self.config.vision_config
-        patch_size = vision_config.patch_size
-        in_channels = vision_config.in_channels
+        patch_size = int(vision_config.patch_size)
+        in_channels = int(vision_config.in_channels)
+
+        # Default sizes
+        if tHW is None:
+            tHW = [[1, 336, 336], [1, 448, 448]]
+
         dev, dt = self.visual.device, self.visual.dtype
-        merge_size = self.visual.spatial_merge_size
-        # thw : t, original H size, original W size
+
         for t, H, W in tHW:
+            # Require H, W to align with patch grid
             if (H % patch_size) != 0 or (W % patch_size) != 0:
                 continue
-            num_h = H // patch_size
-            num_w = W // patch_size
-            num_patch = t * num_h * num_w
-            Cflat = in_channels * patch_size * patch_size
-            dummy_pixel_values = torch.zeros((num_patch, Cflat),
-                                             device=dev, dtype=dt)
-            grid_thw = [[t, num_h, num_w]]
+
+            # Pre-merge patch grid sizes
+            h = H // patch_size
+            w = W // patch_size
+
+            # Number of patches (image: t is typically 1)
+            num_patches = int(t) * int(h) * int(w)
+
+            # Flattened channels per patch for IMAGE path:
+            # cps = C * patch_size * patch_size (NO temporal factor here)
+            c_flat = in_channels * patch_size * patch_size
+
+            # Visual forward expects shape: (num_patches, c_flat)
+            dummy_pixel_values = torch.zeros((num_patches, c_flat),
+                                            device=dev, dtype=dt)
+
+            # Pass PRE-MERGE grid [t, h, w]; do NOT multiply spatial_merge_size
+            grid_thw = [[int(t), int(h), int(w)]]
+
             with suppress(Exception):
                 _ = self.visual(dummy_pixel_values, grid_thw=grid_thw)
