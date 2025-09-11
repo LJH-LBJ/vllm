@@ -2234,6 +2234,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     time_after_load - time_before_load)
         prepare_communication_buffer_for_model(self.model)
 
+        # After the model is loaded, warm up the vision branch
+        self.model.warmup_vision()
+
         if is_mixture_of_experts(
                 self.model) and self.parallel_config.enable_eplb:
             logger.info("EPLB is enabled for model %s.",

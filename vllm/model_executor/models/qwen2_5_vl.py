@@ -26,6 +26,7 @@
 # limitations under the License.
 """Inference-only Qwen2.5-VL model compatible with HuggingFace weights."""
 from collections.abc import Iterable, Mapping
+from contextlib import suppress
 from functools import lru_cache, partial
 from typing import Annotated, Callable, Literal, Optional, Union
 
@@ -1267,3 +1268,33 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             connector="visual.merger.",
             tower_model="visual.",
         )
+
+    @torch.inference_mode()
+    def warmup_vision(self, tHW: Optional[list[list[int]]] = 
+                      [[1, 336, 336], [1, 448, 448]]) -> None:
+        """Run warmup for vision model.
+
+        Args:
+            tHW: List of [t, H, W] for warmup. Default to [[1, 336, 336],
+                [1, 448, 448]] or can be overridden by tHW.
+        """
+        if self.visual is None:
+            return
+        vision_config = self.config.vision_config
+        patch_size = vision_config.patch_size
+        in_channels = vision_config.in_channels
+        dev, dt = self.visual.device, self.visual.dtype
+        merge_size = self.visual.spatial_merge_size
+        # thw : t, original H size, original W size
+        for t, H, W in tHW:
+            if (H % patch_size) != 0 or (W % patch_size) != 0:
+                continue
+            num_h = H // patch_size
+            num_w = W // patch_size
+            num_patch = t * num_h * num_w
+            Cflat = in_channels * patch_size * patch_size
+            dummy_pixel_values = torch.zeros((num_patch, Cflat),
+                                             device=dev, dtype=dt)
+            grid_thw = [[t, num_h, num_w]]
+            with suppress(Exception):
+                _ = self.visual(dummy_pixel_values, grid_thw=grid_thw)
