@@ -42,7 +42,8 @@ from vllm.v1.engine.output_processor import (OutputProcessor,
 from vllm.v1.engine.parallel_sampling import ParentRequest
 from vllm.v1.engine.processor import Processor
 from vllm.v1.executor.abstract import Executor
-from vllm.v1.metrics.loggers import StatLoggerFactory, StatLoggerManager
+from vllm.v1.metrics.loggers import (EPDStatsLogger, StatLoggerFactory,
+                                     StatLoggerManager)
 from vllm.v1.metrics.prometheus import shutdown_prometheus
 from vllm.v1.metrics.stats import IterationStats
 
@@ -142,6 +143,10 @@ class AsyncLLM(EngineClient):
 
         # Loggers.
         self.logger_manager: Optional[StatLoggerManager] = None
+        if stat_loggers:
+            stat_loggers.append(EPDStatsLogger)
+        else:
+            stat_loggers = [EPDStatsLogger]
         if self.log_stats:
             self.logger_manager = StatLoggerManager(
                 vllm_config=vllm_config,
@@ -418,6 +423,14 @@ class AsyncLLM(EngineClient):
             if self.log_requests:
                 logger.info("Request %s failed.", request_id)
             raise EngineGenerateError() from e
+
+    async def get_epd_stats(self) -> dict[int, dict[str, Any]]:
+        """Get EPD stats from all engine shards and clear queue."""
+        stats_dict = dict(EPDStatsLogger.stats_queue)  # copy
+        EPDStatsLogger.stats_queue.clear()  # clear after get
+        if not stats_dict:
+            logger.info("No EPD stats available.")
+        return stats_dict
 
     def _run_output_handler(self):
         """Background loop: pulls from EngineCore and pushes to AsyncStreams."""

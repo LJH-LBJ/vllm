@@ -5,7 +5,7 @@ import logging
 import os
 import time
 from abc import ABC, abstractmethod
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import prometheus_client
 
@@ -757,3 +757,49 @@ class StatLoggerManager:
         for per_engine_loggers in self.per_engine_logger_dict.values():
             for logger in per_engine_loggers:
                 logger.log_engine_initialized()
+
+
+class EPDStatsLogger(LoggingStatLogger):
+    stats_queue: dict[int, dict[str,
+                                Any]] = {}  # class variable for shared queue
+
+    def __init__(self, vllm_config: VllmConfig, engine_index: int = 0):
+        super().__init__(vllm_config, engine_index)
+
+    def log(self):
+        now = time.monotonic()
+        prompt_throughput = self._get_throughput(self.num_prompt_tokens, now)
+        generation_throughput = self._get_throughput(
+            self.num_generation_tokens, now)
+
+        self._reset(now)
+
+        scheduler_stats = self.last_scheduler_stats
+
+        self.last_generation_throughput = generation_throughput
+        self.last_prompt_throughput = prompt_throughput
+
+        stats_dict = {
+            "engine_index":
+            self.engine_index,
+            "prompt_throughput":
+            prompt_throughput,
+            "generation_throughput":
+            generation_throughput,
+            "num_running_reqs":
+            scheduler_stats.num_running_reqs,
+            "num_waiting_reqs":
+            scheduler_stats.num_waiting_reqs,
+            "kv_cache_usage_percent":
+            scheduler_stats.kv_cache_usage * 100,
+            "prefix_cache_hit_rate_percent":
+            self.prefix_caching_metrics.hit_rate * 100,
+        }
+
+        if TIMECOUNT_ENABLED and self.encoder_consume_seconds[0] > 0:
+            stats_dict["encoder_consume_ms_per_request"] = (
+                self.encoder_consume_seconds[1] /
+                self.encoder_consume_seconds[0] * 1000)
+
+        # only keep the latest stats
+        EPDStatsLogger.stats_queue[self.engine_index] = stats_dict
