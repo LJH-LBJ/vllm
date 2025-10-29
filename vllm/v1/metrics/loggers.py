@@ -5,7 +5,8 @@ import logging
 import os
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional, Union
+from collections import defaultdict
+from typing import Callable, Optional, Union
 
 import prometheus_client
 
@@ -68,9 +69,7 @@ class LoggingStatLogger(StatLoggerBase):
         kv_tranfer_config = self.vllm_config.kv_transfer_config
         self.kv_transfer_logging = KVConnectorLogging(kv_tranfer_config)
         self.last_prompt_throughput: float = 0.0
-        if TIMECOUNT_ENABLED:
-            # [count_num, total_seconds]
-            self.encoder_consume_seconds: list[float] = [0.0, 0.0]
+        self.last_generation_throughput: float = 0.0
 
     def _reset(self, now):
         self.last_log_time = now
@@ -78,18 +77,11 @@ class LoggingStatLogger(StatLoggerBase):
         # Tracked stats over current local logging interval.
         self.num_prompt_tokens: int = 0
         self.num_generation_tokens: int = 0
-        if TIMECOUNT_ENABLED:
-            self.encoder_consume_seconds: list[float] = [0.0, 0.0]
 
     def _track_iteration_stats(self, iteration_stats: IterationStats):
         # Save tracked stats for token counters.
         self.num_prompt_tokens += iteration_stats.num_prompt_tokens
         self.num_generation_tokens += iteration_stats.num_generation_tokens
-        if TIMECOUNT_ENABLED:
-            for finished_request in iteration_stats.finished_requests:
-                self.encoder_consume_seconds[0] += 1
-                self.encoder_consume_seconds[1] += \
-                    finished_request.encoder_consume_time
 
     def _get_throughput(self, tracked_stats: int, now: float) -> float:
         # Compute summary metrics for tracked stats
@@ -137,13 +129,13 @@ class LoggingStatLogger(StatLoggerBase):
         self.last_prompt_throughput = prompt_throughput
 
         # Format and print output.
-        log_msg = ("Engine %03d: "
-                   "Avg prompt throughput: %.1f tokens/s, "
-                   "Avg generation throughput: %.1f tokens/s, "
-                   "Running: %d reqs, Waiting: %d reqs, "
-                   "GPU KV cache usage: %.1f%%, "
-                   "Prefix cache hit rate: %.1f%%")
-        log_args = [
+        log_fn(
+            "Engine %03d: "
+            "Avg prompt throughput: %.1f tokens/s, "
+            "Avg generation throughput: %.1f tokens/s, "
+            "Running: %d reqs, Waiting: %d reqs, "
+            "GPU KV cache usage: %.1f%%, "
+            "Prefix cache hit rate: %.1f%%",
             self.engine_index,
             prompt_throughput,
             generation_throughput,
@@ -151,12 +143,7 @@ class LoggingStatLogger(StatLoggerBase):
             scheduler_stats.num_waiting_reqs,
             scheduler_stats.kv_cache_usage * 100,
             self.prefix_caching_metrics.hit_rate * 100,
-        ]
-        if TIMECOUNT_ENABLED and self.encoder_consume_seconds[0] > 0:
-            log_msg += ", Encoder consume seconds: %.3f ms/request"
-            log_args.append(self.encoder_consume_seconds[1] /
-                            self.encoder_consume_seconds[0] * 1000)
-        log_fn(log_msg, *log_args)
+        )
         self.spec_decoding_logging.log(log_fn=log_fn)
         self.kv_transfer_logging.log(log_fn=log_fn)
 
@@ -636,6 +623,168 @@ class PrometheusStatLogger(StatLoggerBase):
         self.log_metrics_info("cache_config", self.vllm_config.cache_config)
 
 
+class EPDStatsLogger(StatLoggerBase):
+
+    def __init__(self, vllm_config: VllmConfig, engine_index: int = 0):
+        self.engine_index = engine_index
+        self.vllm_config = vllm_config
+        self.last_scheduler_stats = SchedulerStats()
+        # Prefix cache metrics. This cannot be reset.
+        # TODO: Make the interval configurable.
+        self.prefix_caching_metrics = PrefixCachingMetrics()
+        self.spec_decoding_logging = SpecDecodingLogging()
+        kv_tranfer_config = self.vllm_config.kv_transfer_config
+        self.kv_transfer_logging = KVConnectorLogging(kv_tranfer_config)
+        self.last_prompt_throughput: float = 0.0
+        # [count_num, total_seconds]
+        self.encoder_consume_seconds: \
+            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
+        self.e2e_time_requests: \
+            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
+        self.queue_time_requests: \
+            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
+        self.prefill_time_requests: \
+            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
+        self.mean_time_per_output_token_requests: \
+            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
+        self.time_to_first_token: \
+            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
+        self.epd_stats_queue: dict[str, Union[int, float]] = {}
+        self.stats_dict_avg: dict[str, dict[str,
+                                            Union[int,
+                                                  float]]] = defaultdict(dict)
+
+    def _reset(self, now):
+        self.last_log_time = now
+
+        # Tracked stats over current local logging interval.
+        self.num_prompt_tokens: int = 0
+        self.num_generation_tokens: int = 0
+
+        self.encoder_consume_seconds["latest"] = [0, 0.0]
+        self.e2e_time_requests["latest"] = [0, 0.0]
+        self.queue_time_requests["latest"] = [0, 0.0]
+        self.prefill_time_requests["latest"] = [0, 0.0]
+        self.mean_time_per_output_token_requests["latest"] = [0, 0.0]
+        self.time_to_first_token["latest"] = [0, 0.0]
+
+    def _track_iteration_stats(self, iteration_stats: IterationStats):
+        # Save tracked stats for token counters.
+        self.num_prompt_tokens += iteration_stats.num_prompt_tokens
+        self.num_generation_tokens += iteration_stats.num_generation_tokens
+
+    def _get_throughput(self, tracked_stats: int, now: float) -> float:
+        # Compute summary metrics for tracked stats
+        delta_time = now - self.last_log_time
+        if delta_time <= 0.0:
+            return 0.0
+        return float(tracked_stats / delta_time)
+
+    def record(self,
+               scheduler_stats: Optional[SchedulerStats],
+               iteration_stats: Optional[IterationStats],
+               engine_idx: int = 0):
+        """Log Stats to standard output."""
+        if iteration_stats:
+            self._track_iteration_stats(iteration_stats)
+            self._observe(iteration_stats)
+
+    def log(self):
+        now = time.monotonic()
+        prompt_throughput = self._get_throughput(self.num_prompt_tokens, now)
+        generation_throughput = self._get_throughput(
+            self.num_generation_tokens, now)
+
+        log_fn = logger.info
+        if not any(
+            (prompt_throughput, generation_throughput,
+             self.last_prompt_throughput, self.last_generation_throughput)):
+            # Avoid log noise on an idle production system
+            log_fn = logger.debug
+        self.last_generation_throughput = generation_throughput
+        self.last_prompt_throughput = prompt_throughput
+
+        log_msg = ("Engine %03d: "
+                   "Avg encoder consume seconds: %.3f ms, "
+                   "Avg e2e time requests: %.3f ms, "
+                   "Avg queue time requests: %.3f ms, "
+                   "Avg prefill time requests: %.3f ms, "
+                   "Avg mean time per output token requests: %.3f ms, "
+                   "Avg time to first token: %.3f ms")
+
+        stats_dict = {
+            "engine_index":
+            self.engine_index,
+            "encoder_consume_seconds":
+            self.encoder_consume_seconds,
+            "e2e_time_requests":
+            self.e2e_time_requests["latest"],
+            "queue_time_requests":
+            self.queue_time_requests["latest"],
+            "prefill_time_requests":
+            self.prefill_time_requests["latest"],
+            "mean_time_per_output_token_requests":
+            self.mean_time_per_output_token_requests["latest"],
+            "time_to_first_token":
+            self.time_to_first_token["latest"],
+        }
+
+        # compute average time for "latest" and "overall"
+        for key, value in stats_dict.items():
+            for phase in ["latest", "overall"]:
+                if isinstance(value, dict):
+                    count_num, total_seconds = value[phase]
+                    avg_time = total_seconds / count_num \
+                        if count_num > 0 else 0.0
+                    self.stats_dict_avg[key][phase] = avg_time
+                elif isinstance(value, int):  #engine_index
+                    self.stats_dict_avg[key][phase] = value
+
+        log_args = [
+            value["latest"] for _, value in self.stats_dict_avg.items()
+        ]
+
+        log_fn(log_msg, *log_args)
+
+        # clear latest stats
+        self._reset(now)
+
+    def get_epd_stats(self) -> dict[str, Union[int, float]]:
+        self.epd_stats_queue = {
+            key: value["overall"]
+            for key, value in self.stats_dict_avg.items()
+        }
+        return self.epd_stats_queue
+
+    # Observe per-request stats
+    # [latest_count_num, latest_seconds, overall_count_num, overall_seconds]
+    def _observe(self, iteration_stats: IterationStats):
+        for finished_request in \
+            iteration_stats.finished_requests:
+            for key in self.encoder_consume_seconds:
+                self.encoder_consume_seconds[key][0] += 1
+                self.encoder_consume_seconds[key][1] += \
+                    finished_request.encoder_consume_time
+                self.e2e_time_requests[key][0] += 1
+                self.e2e_time_requests[key][1] += \
+                    finished_request.e2e_latency
+                self.queue_time_requests[key][0] += 1
+                self.queue_time_requests[key][
+                    1] += finished_request.queued_time
+                self.prefill_time_requests[key][0] += 1
+                self.prefill_time_requests[key][
+                    1] += finished_request.prefill_time
+                self.mean_time_per_output_token_requests[key][0] += 1
+                self.mean_time_per_output_token_requests[key][1] += \
+                    finished_request.mean_time_per_output_token
+        for ttft in iteration_stats.time_to_first_tokens_iter:
+            for key in self.encoder_consume_seconds:
+                self.time_to_first_token[key][0] += 1
+                self.time_to_first_token[key][1] += ttft
+                self.time_to_first_token[key][0] += 1
+                self.time_to_first_token[key][1] += ttft
+
+
 PromMetric = Union[
     prometheus_client.Gauge,
     prometheus_client.Counter,
@@ -751,55 +900,15 @@ class StatLoggerManager:
             for logger in per_engine_loggers:
                 logger.log()
 
+    def get_epd_stats(self) -> Optional[dict[str, Union[int, float]]]:
+        for per_engine_loggers in self.per_engine_logger_dict.values():
+            for logger in per_engine_loggers:
+                if isinstance(logger, EPDStatsLogger):
+                    return logger.get_epd_stats()
+
     def log_engine_initialized(self):
         self.prometheus_logger.log_engine_initialized()
 
         for per_engine_loggers in self.per_engine_logger_dict.values():
             for logger in per_engine_loggers:
                 logger.log_engine_initialized()
-
-
-class EPDStatsLogger(LoggingStatLogger):
-    stats_queue: dict[int, dict[str,
-                                Any]] = {}  # class variable for shared queue
-
-    def __init__(self, vllm_config: VllmConfig, engine_index: int = 0):
-        super().__init__(vllm_config, engine_index)
-
-    def log(self):
-        now = time.monotonic()
-        prompt_throughput = self._get_throughput(self.num_prompt_tokens, now)
-        generation_throughput = self._get_throughput(
-            self.num_generation_tokens, now)
-
-        self._reset(now)
-
-        scheduler_stats = self.last_scheduler_stats
-
-        self.last_generation_throughput = generation_throughput
-        self.last_prompt_throughput = prompt_throughput
-
-        stats_dict = {
-            "engine_index":
-            self.engine_index,
-            "prompt_throughput":
-            prompt_throughput,
-            "generation_throughput":
-            generation_throughput,
-            "num_running_reqs":
-            scheduler_stats.num_running_reqs,
-            "num_waiting_reqs":
-            scheduler_stats.num_waiting_reqs,
-            "kv_cache_usage_percent":
-            scheduler_stats.kv_cache_usage * 100,
-            "prefix_cache_hit_rate_percent":
-            self.prefix_caching_metrics.hit_rate * 100,
-        }
-
-        if TIMECOUNT_ENABLED and self.encoder_consume_seconds[0] > 0:
-            stats_dict["encoder_consume_ms_per_request"] = (
-                self.encoder_consume_seconds[1] /
-                self.encoder_consume_seconds[0] * 1000)
-
-        # only keep the latest stats
-        EPDStatsLogger.stats_queue[self.engine_index] = stats_dict

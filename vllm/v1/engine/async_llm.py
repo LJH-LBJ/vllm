@@ -424,10 +424,10 @@ class AsyncLLM(EngineClient):
                 logger.info("Request %s failed.", request_id)
             raise EngineGenerateError() from e
 
-    async def get_epd_stats(self) -> dict[int, dict[str, Any]]:
+    async def get_epd_stats(self) -> Optional[dict[str, Union[int, float]]]:
         """Get EPD stats from all engine shards and clear queue."""
-        stats_dict = dict(EPDStatsLogger.stats_queue)  # copy
-        EPDStatsLogger.stats_queue.clear()  # clear after get
+        stats_dict: Optional[dict[str, Union[
+            int, float]]] = await self.do_get_epd_stats()
         if not stats_dict:
             logger.info("No EPD stats available.")
         return stats_dict
@@ -617,6 +617,11 @@ class AsyncLLM(EngineClient):
     async def do_log_stats(self) -> None:
         if self.logger_manager:
             self.logger_manager.log()
+
+    async def do_get_epd_stats(self) -> Optional[dict[str, Union[int, float]]]:
+        if self.logger_manager:
+            return self.logger_manager.get_epd_stats()
+        return None
 
     async def check_health(self) -> None:
         logger.debug("Called check_health.")
