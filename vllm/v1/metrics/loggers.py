@@ -769,11 +769,13 @@ class EPDStatsLogger(StatLoggerBase):
             for key, attr in zip(self.EPD_STATS_KEYS[:-1],
                                  self.finished_request_attr):
                 value = getattr(finished_request, attr, 0.0)
+                value *= 1000.0  # convert to milliseconds
                 self.stats_dict[key]["latest"][0] += 1
                 self.stats_dict[key]["latest"][1] += value
                 self.stats_dict[key]["overall"][0] += 1
                 self.stats_dict[key]["overall"][1] += value
         for ttft in iteration_stats.time_to_first_tokens_iter:
+            ttft *= 1000.0  # convert to milliseconds
             self.stats_dict["time_to_first_token"]["latest"][0] += 1
             self.stats_dict["time_to_first_token"]["latest"][1] += ttft
             self.stats_dict["time_to_first_token"]["overall"][0] += 1
