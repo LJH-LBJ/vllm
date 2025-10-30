@@ -626,33 +626,52 @@ class PrometheusStatLogger(StatLoggerBase):
 class EPDStatsLogger(StatLoggerBase):
 
     def __init__(self, vllm_config: VllmConfig, engine_index: int = 0):
+        self.EPD_STATS_KEYS = [
+            "encoder_consume_seconds",
+            "e2e_time_requests",
+            "queue_time_requests",
+            "prefill_time_requests",
+            "mean_time_per_output_token_requests",
+            "time_to_first_token",
+        ]
+        self.finished_request_attr = [
+            "encoder_consume_seconds",
+            "e2e_latency",
+            "queued_time",
+            "prefill_time",
+            "mean_time_per_output_token",
+        ]
         self.engine_index = engine_index
         self.vllm_config = vllm_config
         self.last_scheduler_stats = SchedulerStats()
-        # Prefix cache metrics. This cannot be reset.
-        # TODO: Make the interval configurable.
-        self.prefix_caching_metrics = PrefixCachingMetrics()
-        self.spec_decoding_logging = SpecDecodingLogging()
-        kv_tranfer_config = self.vllm_config.kv_transfer_config
-        self.kv_transfer_logging = KVConnectorLogging(kv_tranfer_config)
         self.last_prompt_throughput: float = 0.0
+        self.last_log_time = time.monotonic()
+        self.num_prompt_tokens: int = 0
+        self.num_generation_tokens: int = 0
         # [count_num, total_seconds]
-        self.encoder_consume_seconds: \
-            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
-        self.e2e_time_requests: \
-            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
-        self.queue_time_requests: \
-            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
-        self.prefill_time_requests: \
-            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
-        self.mean_time_per_output_token_requests: \
-            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
-        self.time_to_first_token: \
-            dict[str, list[float]] = {"latest": [0, 0.0], "overall": [0, 0.0]}
-        self.epd_stats_queue: dict[str, Union[int, float]] = {}
+        # init stats dict
+        self.stats_dict = {
+            key: {
+                "latest": [0, 0.0],
+                "overall": [0, 0.0]
+            }
+            for key in self.EPD_STATS_KEYS
+        }
         self.stats_dict_avg: dict[str, dict[str,
                                             Union[int,
                                                   float]]] = defaultdict(dict)
+        '''
+        e.g.,
+        self.stats_dict_avg = {
+            "encoder_consume_seconds": {"latest": ..., "overall": ...},
+            "e2e_time_requests": {"latest": ..., "overall": ...},
+            "queue_time_requests": {"latest": ..., "overall": ...},
+            "prefill_time_requests": {"latest": ..., "overall": ...},
+            "mean_time_per_output_token_requests": 
+            {"latest": ..., "overall": ...},
+            "time_to_first_token": {"latest": ..., "overall": ...}
+            }
+        '''
 
     def _reset(self, now):
         self.last_log_time = now
@@ -661,12 +680,8 @@ class EPDStatsLogger(StatLoggerBase):
         self.num_prompt_tokens: int = 0
         self.num_generation_tokens: int = 0
 
-        self.encoder_consume_seconds["latest"] = [0, 0.0]
-        self.e2e_time_requests["latest"] = [0, 0.0]
-        self.queue_time_requests["latest"] = [0, 0.0]
-        self.prefill_time_requests["latest"] = [0, 0.0]
-        self.mean_time_per_output_token_requests["latest"] = [0, 0.0]
-        self.time_to_first_token["latest"] = [0, 0.0]
+        for key in self.EPD_STATS_KEYS:
+            getattr(self, key)["latest"] = [0, 0.0]
 
     def _track_iteration_stats(self, iteration_stats: IterationStats):
         # Save tracked stats for token counters.
@@ -703,6 +718,16 @@ class EPDStatsLogger(StatLoggerBase):
             log_fn = logger.debug
         self.last_generation_throughput = generation_throughput
         self.last_prompt_throughput = prompt_throughput
+        # compute average stats
+        self.stats_dict_avg = {
+            key: {
+                phase: (self.stats_dict[key][phase][1] /
+                        self.stats_dict[key][phase][0]
+                        if self.stats_dict[key][phase][0] > 0 else 0.0)
+                for phase in ["latest", "overall"]
+            }
+            for key in self.EPD_STATS_KEYS
+        }
 
         log_msg = ("Engine %03d: "
                    "Avg encoder consume seconds: %.3f ms, "
@@ -711,78 +736,47 @@ class EPDStatsLogger(StatLoggerBase):
                    "Avg prefill time requests: %.3f ms, "
                    "Avg mean time per output token requests: %.3f ms, "
                    "Avg time to first token: %.3f ms")
+        log_msg = ("Engine %03d: " + ", ".join([
+            f"Avg {key.replace('_', ' ')}: %.3f ms"
+            for key in self.EPD_STATS_KEYS
+        ]))
 
-        stats_dict = {
-            "engine_index":
-            self.engine_index,
-            "encoder_consume_seconds":
-            self.encoder_consume_seconds,
-            "e2e_time_requests":
-            self.e2e_time_requests["latest"],
-            "queue_time_requests":
-            self.queue_time_requests["latest"],
-            "prefill_time_requests":
-            self.prefill_time_requests["latest"],
-            "mean_time_per_output_token_requests":
-            self.mean_time_per_output_token_requests["latest"],
-            "time_to_first_token":
-            self.time_to_first_token["latest"],
-        }
-
-        # compute average time for "latest" and "overall"
-        for key, value in stats_dict.items():
-            for phase in ["latest", "overall"]:
-                if isinstance(value, dict):
-                    count_num, total_seconds = value[phase]
-                    avg_time = total_seconds / count_num \
-                        if count_num > 0 else 0.0
-                    self.stats_dict_avg[key][phase] = avg_time
-                elif isinstance(value, int):  #engine_index
-                    self.stats_dict_avg[key][phase] = value
-
-        log_args = [
-            value["latest"] for _, value in self.stats_dict_avg.items()
+        log_args = [self.engine_index] + [
+            self.stats_dict_avg[key]["latest"] for key in self.EPD_STATS_KEYS
         ]
-
         log_fn(log_msg, *log_args)
-
         # clear latest stats
         self._reset(now)
 
     def get_epd_stats(self) -> dict[str, Union[int, float]]:
-        self.epd_stats_queue = {
-            key: value["overall"]
-            for key, value in self.stats_dict_avg.items()
+        return {
+            "engine_index": self.engine_index,
+            **{
+                key: self.stats_dict_avg.get(key, {}).get("overall", 0.0)
+                for key in self.EPD_STATS_KEYS
+            }
         }
-        return self.epd_stats_queue
 
     # Observe per-request stats
     # [latest_count_num, latest_seconds, overall_count_num, overall_seconds]
     def _observe(self, iteration_stats: IterationStats):
+        # update stats_dict
+        # last item is time_to_first_token
+        # it should be handled separately from time_to_first_tokens_iter
         for finished_request in \
             iteration_stats.finished_requests:
-            for key in self.encoder_consume_seconds:
-                self.encoder_consume_seconds[key][0] += 1
-                self.encoder_consume_seconds[key][1] += \
-                    finished_request.encoder_consume_time
-                self.e2e_time_requests[key][0] += 1
-                self.e2e_time_requests[key][1] += \
-                    finished_request.e2e_latency
-                self.queue_time_requests[key][0] += 1
-                self.queue_time_requests[key][
-                    1] += finished_request.queued_time
-                self.prefill_time_requests[key][0] += 1
-                self.prefill_time_requests[key][
-                    1] += finished_request.prefill_time
-                self.mean_time_per_output_token_requests[key][0] += 1
-                self.mean_time_per_output_token_requests[key][1] += \
-                    finished_request.mean_time_per_output_token
+            for key, attr in zip(self.EPD_STATS_KEYS[:-1],
+                                 self.finished_request_attr):
+                value = getattr(finished_request, attr, 0.0)
+                self.stats_dict[key]["latest"][0] += 1
+                self.stats_dict[key]["latest"][1] += value
+                self.stats_dict[key]["overall"][0] += 1
+                self.stats_dict[key]["overall"][1] += value
         for ttft in iteration_stats.time_to_first_tokens_iter:
-            for key in self.encoder_consume_seconds:
-                self.time_to_first_token[key][0] += 1
-                self.time_to_first_token[key][1] += ttft
-                self.time_to_first_token[key][0] += 1
-                self.time_to_first_token[key][1] += ttft
+            self.stats_dict["time_to_first_token"]["latest"][0] += 1
+            self.stats_dict["time_to_first_token"]["latest"][1] += ttft
+            self.stats_dict["time_to_first_token"]["overall"][0] += 1
+            self.stats_dict["time_to_first_token"]["overall"][1] += ttft
 
 
 PromMetric = Union[
@@ -902,9 +896,11 @@ class StatLoggerManager:
 
     def get_epd_stats(self) -> Optional[dict[str, Union[int, float]]]:
         for per_engine_loggers in self.per_engine_logger_dict.values():
-            for logger in per_engine_loggers:
-                if isinstance(logger, EPDStatsLogger):
-                    return logger.get_epd_stats()
+            for _logger in per_engine_loggers:
+                if isinstance(_logger, EPDStatsLogger):
+                    return _logger.get_epd_stats()
+        logger.info("EPDStatsLogger not found in StatLoggerManager.")
+        return None
 
     def log_engine_initialized(self):
         self.prometheus_logger.log_engine_initialized()

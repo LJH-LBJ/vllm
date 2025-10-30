@@ -143,10 +143,9 @@ class AsyncLLM(EngineClient):
 
         # Loggers.
         self.logger_manager: Optional[StatLoggerManager] = None
-        if stat_loggers:
+        stat_loggers = list(stat_loggers) if stat_loggers else []
+        if EPDStatsLogger not in stat_loggers:
             stat_loggers.append(EPDStatsLogger)
-        else:
-            stat_loggers = [EPDStatsLogger]
         if self.log_stats:
             self.logger_manager = StatLoggerManager(
                 vllm_config=vllm_config,
