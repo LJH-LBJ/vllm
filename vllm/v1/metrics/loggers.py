@@ -645,6 +645,7 @@ class EPDStatsLogger(StatLoggerBase):
         self.vllm_config = vllm_config
         self.last_scheduler_stats = SchedulerStats()
         self.last_prompt_throughput: float = 0.0
+        self.last_generation_throughput: float = 0.0
         self.last_log_time = time.monotonic()
         self.num_prompt_tokens: int = 0
         self.num_generation_tokens: int = 0
