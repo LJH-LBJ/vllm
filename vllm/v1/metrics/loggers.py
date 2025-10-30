@@ -635,7 +635,7 @@ class EPDStatsLogger(StatLoggerBase):
             "time_to_first_token",
         ]
         self.finished_request_attr = [
-            "encoder_consume_seconds",
+            "encoder_consume_time",
             "e2e_latency",
             "queued_time",
             "prefill_time",
