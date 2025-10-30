@@ -680,8 +680,8 @@ class EPDStatsLogger(StatLoggerBase):
         self.num_prompt_tokens: int = 0
         self.num_generation_tokens: int = 0
 
-        for key in self.EPD_STATS_KEYS:
-            getattr(self, key)["latest"] = [0, 0.0]
+        for key in self.stats_dict:
+            self.stats_dict[key]["latest"] = [0, 0.0]
 
     def _track_iteration_stats(self, iteration_stats: IterationStats):
         # Save tracked stats for token counters.
