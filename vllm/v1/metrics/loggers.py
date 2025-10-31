@@ -678,8 +678,8 @@ class EPDStatsLogger(StatLoggerBase):
         self.last_log_time = now
 
         # Tracked stats over current local logging interval.
-        self.num_prompt_tokens: int = 0
-        self.num_generation_tokens: int = 0
+        self.num_prompt_tokens = 0
+        self.num_generation_tokens = 0
 
         for key in self.stats_dict:
             self.stats_dict[key]["latest"] = [0, 0.0]
