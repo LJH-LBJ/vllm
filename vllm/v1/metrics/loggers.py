@@ -908,7 +908,9 @@ class StatLoggerManager:
             for _logger in per_engine_loggers:
                 if isinstance(_logger, EPDStatsLogger):
                     epd_stats_dict[engine_ind] = _logger.get_epd_stats()
-        if not epd_stats_dict:
+        if epd_stats_dict:
+            return epd_stats_dict
+        else:
             logger.info("EPDStatsLogger not found in StatLoggerManager.")
             return None
 
