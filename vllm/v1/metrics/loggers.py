@@ -662,7 +662,6 @@ class EPDStatsLogger(StatLoggerBase):
         '''
         e.g.,
         self.stats_dict_avg = {
-            "encoder_consume_seconds": {"latest": ..., "overall": ...},
             "e2e_time_requests": {"latest": ..., "overall": ...},
             "queue_time_requests": {"latest": ..., "overall": ...},
             "prefill_time_requests": {"latest": ..., "overall": ...},
@@ -729,7 +728,6 @@ class EPDStatsLogger(StatLoggerBase):
         }
 
         log_msg = ("Engine %03d: "
-                   "Avg encoder consume seconds: %.3f ms, "
                    "Avg e2e time requests: %.3f ms, "
                    "Avg queue time requests: %.3f ms, "
                    "Avg prefill time requests: %.3f ms, "
