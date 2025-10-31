@@ -627,7 +627,6 @@ class EPDStatsLogger(StatLoggerBase):
 
     def __init__(self, vllm_config: VllmConfig, engine_index: int = 0):
         self.EPD_STATS_KEYS = [
-            "encoder_consume_seconds",
             "e2e_time_requests",
             "queue_time_requests",
             "prefill_time_requests",
@@ -635,7 +634,6 @@ class EPDStatsLogger(StatLoggerBase):
             "time_to_first_token",
         ]
         self.finished_request_attr = [
-            "encoder_consume_time",
             "e2e_latency",
             "queued_time",
             "prefill_time",

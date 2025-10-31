@@ -186,7 +186,6 @@ class Scheduler(SchedulerInterface):
             dcp_world_size=self.dcp_world_size,
         )
         self.use_pp = self.parallel_config.pipeline_parallel_size > 1
-        self._epd_encoder_reqs: set[str] = set()
 
     def schedule(self) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
@@ -337,12 +336,6 @@ class Scheduler(SchedulerInterface):
                 for i in encoder_inputs_to_schedule:
                     self.encoder_cache_manager.allocate(request, i)
                 encoder_compute_budget = new_encoder_compute_budget
-                if self.log_stats and TIMECOUNT_ENABLED and request.request_id\
-                    not in self._epd_encoder_reqs:
-                    # Record EPD encoder request
-                    self._epd_encoder_reqs.add(request.request_id)
-                    request.record_event(
-                        EngineCoreEventType.ENCODER_CONSUME_START)
             if external_load_encoder_input:
                 for i in external_load_encoder_input:
                     self.encoder_cache_manager.allocate(request, i)
@@ -572,12 +565,6 @@ class Scheduler(SchedulerInterface):
                     for i in encoder_inputs_to_schedule:
                         self.encoder_cache_manager.allocate(request, i)
                     encoder_compute_budget = new_encoder_compute_budget
-                    if self.log_stats and TIMECOUNT_ENABLED \
-                        and request.request_id not in self._epd_encoder_reqs:
-                        # Record EPD encoder request
-                        self._epd_encoder_reqs.add(request.request_id)
-                        request.record_event(
-                            EngineCoreEventType.ENCODER_CONSUME_START)
                 # Allocate for external load encoder cache
                 if external_load_encoder_input:
                     for i in external_load_encoder_input:
@@ -954,9 +941,6 @@ class Scheduler(SchedulerInterface):
                 # request is aborted while the model is executing it (e.g.,
                 # in pipeline parallelism).
                 continue
-            if self.log_stats and TIMECOUNT_ENABLED and (
-                    req_id in self._epd_encoder_reqs):
-                request.record_event(EngineCoreEventType.ENCODER_CONSUME_END)
             req_index = model_runner_output.req_id_to_index[req_id]
             generated_token_ids = sampled_token_ids[
                 req_index] if sampled_token_ids else []
@@ -1051,8 +1035,6 @@ class Scheduler(SchedulerInterface):
         if stopped_preempted_reqs:
             # This is a rare case and unlikely to impact performance.
             self.waiting.remove_requests(stopped_preempted_reqs)
-        if self.log_stats and TIMECOUNT_ENABLED:
-            self._epd_encoder_reqs.clear()
         # KV Connector: update state for finished KV Transfers.
         if model_runner_output.kv_connector_output:
             self._update_from_kv_xfer_finished(
