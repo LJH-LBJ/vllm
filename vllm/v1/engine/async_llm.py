@@ -47,6 +47,9 @@ from vllm.v1.metrics.loggers import (EPDStatsLogger, StatLoggerFactory,
 from vllm.v1.metrics.prometheus import shutdown_prometheus
 from vllm.v1.metrics.stats import IterationStats
 
+TIMECOUNT_ENABLED = os.getenv("TIMECOUNT_ENABLED",
+                              "0") in ("1", "true", "True")
+
 logger = init_logger(__name__)
 
 
@@ -144,7 +147,7 @@ class AsyncLLM(EngineClient):
         # Loggers.
         self.logger_manager: Optional[StatLoggerManager] = None
         stat_loggers = list(stat_loggers) if stat_loggers else []
-        if EPDStatsLogger not in stat_loggers:
+        if TIMECOUNT_ENABLED and EPDStatsLogger not in stat_loggers:
             stat_loggers.append(EPDStatsLogger)
         if self.log_stats:
             self.logger_manager = StatLoggerManager(
@@ -423,10 +426,11 @@ class AsyncLLM(EngineClient):
                 logger.info("Request %s failed.", request_id)
             raise EngineGenerateError() from e
 
-    async def get_epd_stats(self) -> Optional[dict[str, Union[int, float]]]:
+    async def get_epd_stats(
+            self) -> Optional[dict[int, dict[str, Union[int, float]]]]:
         """Get EPD stats from all engine shards and clear queue."""
-        stats_dict: Optional[dict[str, Union[
-            int, float]]] = await self.do_get_epd_stats()
+        stats_dict: Optional[dict[int, dict[str, Union[
+            int, float]]]] = await self.do_get_epd_stats()
         if not stats_dict:
             logger.info("No EPD stats available.")
         return stats_dict
@@ -617,7 +621,8 @@ class AsyncLLM(EngineClient):
         if self.logger_manager:
             self.logger_manager.log()
 
-    async def do_get_epd_stats(self) -> Optional[dict[str, Union[int, float]]]:
+    async def do_get_epd_stats(
+            self) -> Optional[dict[int, dict[str, Union[int, float]]]]:
         if self.logger_manager:
             return self.logger_manager.get_epd_stats()
         return None
