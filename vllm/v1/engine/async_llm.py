@@ -42,13 +42,9 @@ from vllm.v1.engine.output_processor import (OutputProcessor,
 from vllm.v1.engine.parallel_sampling import ParentRequest
 from vllm.v1.engine.processor import Processor
 from vllm.v1.executor.abstract import Executor
-from vllm.v1.metrics.loggers import (EPDStatsLogger, StatLoggerFactory,
-                                     StatLoggerManager)
+from vllm.v1.metrics.loggers import StatLoggerFactory, StatLoggerManager
 from vllm.v1.metrics.prometheus import shutdown_prometheus
 from vllm.v1.metrics.stats import IterationStats
-
-TIMECOUNT_ENABLED = os.getenv("TIMECOUNT_ENABLED",
-                              "0") in ("1", "true", "True")
 
 logger = init_logger(__name__)
 
@@ -147,8 +143,6 @@ class AsyncLLM(EngineClient):
         # Loggers.
         self.logger_manager: Optional[StatLoggerManager] = None
         stat_loggers = list(stat_loggers) if stat_loggers else []
-        if TIMECOUNT_ENABLED and EPDStatsLogger not in stat_loggers:
-            stat_loggers.append(EPDStatsLogger)
         if self.log_stats:
             self.logger_manager = StatLoggerManager(
                 vllm_config=vllm_config,
@@ -426,7 +420,7 @@ class AsyncLLM(EngineClient):
                 logger.info("Request %s failed.", request_id)
             raise EngineGenerateError() from e
 
-    async def get_epd_stats(
+    async def get_disagg_worker_stats(
             self) -> Optional[dict[int, dict[str, Union[int, float]]]]:
         """Get EPD stats from all engine shards and clear queue."""
         stats_dict: Optional[dict[int, dict[str, Union[

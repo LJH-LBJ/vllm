@@ -2,7 +2,6 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import logging
-import os
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -19,9 +18,6 @@ from vllm.v1.engine import FinishReason
 from vllm.v1.metrics.prometheus import unregister_vllm_metrics
 from vllm.v1.metrics.stats import IterationStats, SchedulerStats
 from vllm.v1.spec_decode.metrics import SpecDecodingLogging, SpecDecodingProm
-
-TIMECOUNT_ENABLED = os.getenv("TIMECOUNT_ENABLED",
-                              "0") in ("1", "true", "True")
 
 logger = init_logger(__name__)
 
@@ -623,7 +619,7 @@ class PrometheusStatLogger(StatLoggerBase):
         self.log_metrics_info("cache_config", self.vllm_config.cache_config)
 
 
-class EPDStatsLogger(StatLoggerBase):
+class DisaggWorkerStatsLogger(StatLoggerBase):
 
     def __init__(self, vllm_config: VllmConfig, engine_index: int = 0):
         self.EPD_STATS_KEYS = [
@@ -727,12 +723,6 @@ class EPDStatsLogger(StatLoggerBase):
             for key in self.EPD_STATS_KEYS
         }
 
-        log_msg = ("Engine %03d: "
-                   "Avg e2e time requests: %.3f ms, "
-                   "Avg queue time requests: %.3f ms, "
-                   "Avg prefill time requests: %.3f ms, "
-                   "Avg mean time per output token requests: %.3f ms, "
-                   "Avg time to first token: %.3f ms")
         log_msg = ("Engine %03d: " + ", ".join([
             f"Avg {key.replace('_', ' ')}: %.3f ms"
             for key in self.EPD_STATS_KEYS
@@ -906,12 +896,13 @@ class StatLoggerManager:
         for engine_ind, per_engine_loggers in\
             self.per_engine_logger_dict.items():
             for _logger in per_engine_loggers:
-                if isinstance(_logger, EPDStatsLogger):
+                if isinstance(_logger, DisaggWorkerStatsLogger):
                     epd_stats_dict[engine_ind] = _logger.get_epd_stats()
         if epd_stats_dict:
             return epd_stats_dict
         else:
-            logger.info("EPDStatsLogger not found in StatLoggerManager.")
+            logger.info(
+                "DisaggWorkerStatsLogger not found in StatLoggerManager.")
             return None
 
     def log_engine_initialized(self):
