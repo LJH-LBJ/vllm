@@ -419,15 +419,6 @@ class AsyncLLM(EngineClient):
                 logger.info("Request %s failed.", request_id)
             raise EngineGenerateError() from e
 
-    async def get_disagg_worker_stats(
-            self) -> Optional[dict[int, dict[str, Union[int, float]]]]:
-        """Get EPD stats from all engine shards and clear queue."""
-        stats_dict: Optional[dict[int, dict[str, Union[
-            int, float]]]] = await self.do_get_epd_stats()
-        if not stats_dict:
-            logger.info("No EPD stats available.")
-        return stats_dict
-
     def _run_output_handler(self):
         """Background loop: pulls from EngineCore and pushes to AsyncStreams."""
 
@@ -613,12 +604,6 @@ class AsyncLLM(EngineClient):
     async def do_log_stats(self) -> None:
         if self.logger_manager:
             self.logger_manager.log()
-
-    async def do_get_epd_stats(
-            self) -> Optional[dict[int, dict[str, Union[int, float]]]]:
-        if self.logger_manager:
-            return self.logger_manager.get_epd_stats()
-        return None
 
     async def check_health(self) -> None:
         logger.debug("Called check_health.")

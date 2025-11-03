@@ -733,23 +733,6 @@ class StatLoggerManager:
             for logger in per_engine_loggers:
                 logger.log()
 
-    def get_epd_stats(
-            self) -> Optional[dict[int, dict[str, Union[int, float]]]]:
-        from llm_service.stats_loggers import DisaggWorkerStatsLogger
-        epd_stats_dict: dict[int, dict[str, Union[int, float]]] = {}
-        for engine_ind, per_engine_loggers in\
-            self.per_engine_logger_dict.items():
-            for _logger in per_engine_loggers:
-                if isinstance(_logger, DisaggWorkerStatsLogger):
-                    epd_stats_dict[engine_ind] = _logger.get_epd_stats(
-                    )  # type: ignore
-        if epd_stats_dict:
-            return epd_stats_dict
-        else:
-            logger.info(
-                "DisaggWorkerStatsLogger not found in StatLoggerManager.")
-            return None
-
     def log_engine_initialized(self):
         self.prometheus_logger.log_engine_initialized()
 
