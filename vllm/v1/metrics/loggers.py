@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 from typing import Callable, Optional, Union
 
 import prometheus_client
-from llm_service.stats_loggers import DisaggWorkerStatsLogger
 
 from vllm.config import SupportsMetricsInfo, VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.v1.metrics import (
@@ -736,6 +735,7 @@ class StatLoggerManager:
 
     def get_epd_stats(
             self) -> Optional[dict[int, dict[str, Union[int, float]]]]:
+        from llm_service.stats_loggers import DisaggWorkerStatsLogger
         epd_stats_dict: dict[int, dict[str, Union[int, float]]] = {}
         for engine_ind, per_engine_loggers in\
             self.per_engine_logger_dict.items():
