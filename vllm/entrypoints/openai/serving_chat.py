@@ -475,7 +475,7 @@ class OpenAIServingChat(OpenAIServing):
 
         return delta_message, function_name_returned
 
-    def get_metrics_from_request_output(
+    def add_metrics_to_request_output(
         self, request: ChatCompletionRequest,
         response: Union[ChatCompletionStreamResponse, ChatCompletionResponse],
         res: RequestOutput, metric_type: str, key: str
@@ -668,7 +668,7 @@ class OpenAIServingChat(OpenAIServing):
                                               None))
                         chunk = cast(
                             ChatCompletionStreamResponse,
-                            self.get_metrics_from_request_output(
+                            self.add_metrics_to_request_output(
                                 request, chunk, res, "encode",
                                 "encode_time_ms"))
 
@@ -1488,8 +1488,8 @@ class OpenAIServingChat(OpenAIServing):
         )
         response = cast(
             ChatCompletionResponse,
-            self.get_metrics_from_request_output(request, response, final_res,
-                                                 "encode", "encode_time_ms"))
+            self.add_metrics_to_request_output(request, response, final_res,
+                                               "encode", "encode_time_ms"))
 
         # Log complete response if output logging is enabled
         if self.enable_log_outputs and self.request_logger:
