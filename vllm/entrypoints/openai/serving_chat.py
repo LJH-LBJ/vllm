@@ -525,8 +525,10 @@ class OpenAIServingChat(OpenAIServing):
             if isinstance(capture_metrics_result, dict) \
                 and key in capture_metrics_result:
                 value = capture_metrics_result[key]
-                response.metrics[key] = int(
-                    value) if value is not None else None
+                try:
+                    response.metrics[key] = int(value) if value is not None else None
+                except (TypeError, ValueError):
+                    response.metrics[key] = None
             else:
                 response.metrics[key] = None
         return response
