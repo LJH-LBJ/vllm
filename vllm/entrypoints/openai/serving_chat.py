@@ -476,19 +476,20 @@ class OpenAIServingChat(OpenAIServing):
         return delta_message, function_name_returned
 
     def get_metrics_from_request_output(
-            self, request: ChatCompletionRequest,
-            response: ChatCompletionStreamResponse, res: RequestOutput,
-            switch_name: str, key: str
+        self, request: ChatCompletionRequest,
+        response: Union[ChatCompletionStreamResponse, ChatCompletionResponse], 
+        res: RequestOutput, switch_name: str, key: str
     ) -> Union[ChatCompletionStreamResponse, ChatCompletionResponse]:
         enable_metrics = getattr(request, "enable_metrics", None)
         if enable_metrics and enable_metrics.get(switch_name, False):
             if response.metrics is None:
                 response.metrics = {}
-            capture_metrics_result = getattr(res, "capture_metrics_result", None)
+            capture_metrics_result = getattr(res, "capture_metrics_result")
             if isinstance(capture_metrics_result, dict) \
                 and key in capture_metrics_result:
                 value = capture_metrics_result[key]
-                response.metrics[key] = int(value) if value is not None else None
+                response.metrics[key] = int(
+                    value) if value is not None else None
             else:
                 response.metrics[key] = None
         return response
