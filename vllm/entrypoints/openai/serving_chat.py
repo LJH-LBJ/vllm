@@ -631,9 +631,7 @@ class OpenAIServingChat(OpenAIServing):
                             ChatCompletionStreamResponse,
                             self.get_metrics_from_request_output(
                                 request, chunk, res, "encode",
-                                "encode_time_ms"
-                                )
-                            )
+                                "encode_time_ms"))
 
                         # if continuous usage stats are requested, add it
                         if include_continuous_usage:
@@ -1449,12 +1447,10 @@ class OpenAIServingChat(OpenAIServing):
                               if request.return_token_ids else None),
             kv_transfer_params=final_res.kv_transfer_params,
         )
-        response = cast(ChatCompletionResponse, 
-                        self.get_metrics_from_request_output(
-                        request, response, final_res, "encode",
-                        "encode_time_ms"
-                        )
-                    )
+        response = cast(
+            ChatCompletionResponse,
+            self.get_metrics_from_request_output(request, response, final_res,
+                                                 "encode", "encode_time_ms"))
 
         # Log complete response if output logging is enabled
         if self.enable_log_outputs and self.request_logger:
