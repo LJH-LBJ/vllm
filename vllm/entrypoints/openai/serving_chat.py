@@ -526,7 +526,8 @@ class OpenAIServingChat(OpenAIServing):
                 and key in capture_metrics_result:
                 value = capture_metrics_result[key]
                 try:
-                    response.metrics[key] = int(value) if value is not None else None
+                    response.metrics[key] = int(
+                        value) if value is not None else None
                 except (TypeError, ValueError):
                     response.metrics[key] = None
             else:

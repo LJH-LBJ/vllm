@@ -1891,7 +1891,8 @@ class ChatCompletionResponse(OpenAIBaseModel):
     kv_transfer_params: Optional[dict[str, Any]] = Field(
         default=None, description="KVTransfer parameters.")
     metrics: Optional[dict[str, Any]] = Field(
-        default=None, description="Metrics collected during request processing.")
+        default=None,
+        description="Metrics collected during request processing.")
 
 
 class DeltaMessage(OpenAIBaseModel):
@@ -1921,7 +1922,8 @@ class ChatCompletionStreamResponse(OpenAIBaseModel):
     # not part of the OpenAI spec but for tracing the tokens
     prompt_token_ids: Optional[list[int]] = None
     metrics: Optional[dict[str, Any]] = Field(
-        default=None, description="Metrics collected during request processing.")
+        default=None,
+        description="Metrics collected during request processing.")
 
 
 class TranscriptionResponseStreamChoice(OpenAIBaseModel):
