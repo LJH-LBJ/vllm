@@ -482,7 +482,7 @@ class OpenAIServingChat(OpenAIServing):
     ) -> Union[ChatCompletionStreamResponse, ChatCompletionResponse]:
         """
         Extract a single metric value from a ``RequestOutput`` and attach it to
-        the OpenAI-compatible response object when metrics collection is enabled.
+        the OpenAI-compatible response when metrics collection is enabled.
 
         This method inspects ``request.enable_metrics`` for the provided
         ``switch_name``. If the switch is enabled, it reads
