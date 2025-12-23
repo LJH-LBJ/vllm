@@ -478,10 +478,10 @@ class OpenAIServingChat(OpenAIServing):
     def get_metrics_from_request_output(
         self, request: ChatCompletionRequest,
         response: Union[ChatCompletionStreamResponse, ChatCompletionResponse],
-        res: RequestOutput, switch_name: str, key: str
+        res: RequestOutput, metric_type: str, key: str
     ) -> Union[ChatCompletionStreamResponse, ChatCompletionResponse]:
         enable_metrics = getattr(request, "enable_metrics", None)
-        if enable_metrics and enable_metrics.get(switch_name, False):
+        if enable_metrics and enable_metrics.get(metric_type, False):
             if response.metrics is None:
                 response.metrics = {}
             capture_metrics_result = res.capture_metrics_result
