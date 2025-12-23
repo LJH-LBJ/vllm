@@ -480,6 +480,43 @@ class OpenAIServingChat(OpenAIServing):
         response: Union[ChatCompletionStreamResponse, ChatCompletionResponse],
         res: RequestOutput, metric_type: str, key: str
     ) -> Union[ChatCompletionStreamResponse, ChatCompletionResponse]:
+        """
+        Extract a single metric value from a ``RequestOutput`` and attach it to
+        the OpenAI-compatible response object when metrics collection is enabled.
+
+        This method inspects ``request.enable_metrics`` for the provided
+        ``switch_name``. If the switch is enabled, it reads
+        ``res.capture_metrics_result`` (expected to be a mapping) and, when
+        present, copies the value for ``key`` into ``response.metrics[key]``,
+        casting non-``None`` values to ``int``. If metrics are not enabled,
+        or if the key is missing, ``response.metrics[key]`` is set to ``None``.
+
+        Parameters
+        ----------
+        request:
+            The original chat completion request, potentially containing the
+            ``enable_metrics`` configuration used to decide whether to record
+            this metric.
+        response:
+            The response object that will be returned to the client. Its
+            ``metrics`` dictionary is created if necessary and updated with
+            the extracted metric value under ``key``.
+        res:
+            The lower-level ``RequestOutput`` produced by the engine, which
+            provides the ``capture_metrics_result`` dictionary.
+        switch_name:
+            The name of the feature flag inside ``request.enable_metrics`` that
+            controls whether this particular metric should be extracted.
+        key:
+            The name of the metric to retrieve from
+            ``res.capture_metrics_result`` and store in ``response.metrics``.
+
+        Returns
+        -------
+        ChatCompletionStreamResponse | ChatCompletionResponse
+            The same ``response`` object, potentially updated with a metric
+            entry under ``metrics[key]``.
+        """
         enable_metrics = getattr(request, "enable_metrics", None)
         if enable_metrics and enable_metrics.get(metric_type, False):
             if response.metrics is None:
