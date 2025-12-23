@@ -6,7 +6,7 @@ import json
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from collections.abc import Sequence as GenericSequence
-from typing import Callable, Final, Optional, Union
+from typing import Callable, Final, Optional, Union, cast
 
 import jinja2
 import partial_json_parser
@@ -477,14 +477,14 @@ class OpenAIServingChat(OpenAIServing):
 
     def get_metrics_from_request_output(
         self, request: ChatCompletionRequest,
-        response: Union[ChatCompletionStreamResponse, ChatCompletionResponse], 
+        response: Union[ChatCompletionStreamResponse, ChatCompletionResponse],
         res: RequestOutput, switch_name: str, key: str
     ) -> Union[ChatCompletionStreamResponse, ChatCompletionResponse]:
         enable_metrics = getattr(request, "enable_metrics", None)
         if enable_metrics and enable_metrics.get(switch_name, False):
             if response.metrics is None:
                 response.metrics = {}
-            capture_metrics_result = getattr(res, "capture_metrics_result")
+            capture_metrics_result = res.capture_metrics_result
             if isinstance(capture_metrics_result, dict) \
                 and key in capture_metrics_result:
                 value = capture_metrics_result[key]
@@ -627,8 +627,13 @@ class OpenAIServingChat(OpenAIServing):
                             prompt_token_ids=(res.prompt_token_ids
                                               if request.return_token_ids else
                                               None))
-                        chunk = self.get_metrics_from_request_output(
-                            request, chunk, res, "encode", "encode_time_ms")
+                        chunk = cast(
+                            ChatCompletionStreamResponse,
+                            self.get_metrics_from_request_output(
+                                request, chunk, res, "encode",
+                                "encode_time_ms"
+                                )
+                            )
 
                         # if continuous usage stats are requested, add it
                         if include_continuous_usage:
@@ -1444,8 +1449,12 @@ class OpenAIServingChat(OpenAIServing):
                               if request.return_token_ids else None),
             kv_transfer_params=final_res.kv_transfer_params,
         )
-        response = self.get_metrics_from_request_output(
-            request, response, final_res, "encode", "encode_time_ms")
+        response = cast(ChatCompletionResponse, 
+                        self.get_metrics_from_request_output(
+                        request, response, final_res, "encode",
+                        "encode_time_ms"
+                        )
+                    )
 
         # Log complete response if output logging is enabled
         if self.enable_log_outputs and self.request_logger:
