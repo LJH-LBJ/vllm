@@ -1890,7 +1890,8 @@ class ChatCompletionResponse(OpenAIBaseModel):
     prompt_token_ids: Optional[list[int]] = None
     kv_transfer_params: Optional[dict[str, Any]] = Field(
         default=None, description="KVTransfer parameters.")
-    metrics: Optional[dict[str, Any]] = None
+    metrics: Optional[dict[str, Any]] = Field(
+        default=None, description="Metrics collected during request processing.")
 
 
 class DeltaMessage(OpenAIBaseModel):
